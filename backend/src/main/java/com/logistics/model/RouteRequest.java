@@ -7,6 +7,24 @@ public class RouteRequest {
     private String trafficLevel; // LOW | MEDIUM | HIGH
     private String timeOfDay; // MORNING | AFTERNOON | PEAK | NIGHT
     private String routeType; // CITY | HIGHWAY
+    private double distanceKm;
+    private double baseTime;
+
+    public void setDistanceKm(double distanceKm) {
+        this.distanceKm = distanceKm;
+    }
+
+    public void setBaseTime(double baseTime) {
+        this.baseTime = baseTime;
+    }
+
+    public double getDistanceKm() {
+        return distanceKm;
+    }
+
+    public double getBaseTime() {
+        return baseTime;
+    }
 
     public String getSource() {
         return source;

@@ -4,7 +4,7 @@ Port: 5000
 
 Endpoints:
     GET  /health    → Health check (useful for demo)
-    POST /predict   → Accepts route features, returns predicted time
+    POST /predict   → Accepts route features, returns predicted DELAY RATIO
 
 Start: uvicorn app:app --port 5000 --reload
 """
@@ -42,11 +42,10 @@ logger.info("✅ ML model loaded from %s", MODEL_PATH)
 
 app = FastAPI(
     title="Logistics Delay Prediction API",
-    description="Random Forest model predicting delivery time based on route features",
-    version="1.0.0"
+    description="Random Forest model predicting delay ratio based on traffic features",
+    version="2.0.0"
 )
 
-# Allow Spring Boot backend to call this service
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -59,15 +58,17 @@ app.add_middleware(
 class PredictRequest(BaseModel):
     """
     Feature input for the ML model.
-    Must match the encoding used in SimulationService.java.
+    NOTE: distance_km is accepted but NOT passed to model —
+    the model predicts a ratio, so distance is irrelevant here.
+    Actual delay = ratio × base_time (applied in MLClientService.java)
     """
-    distance_km:   float = Field(..., gt=0, description="Route distance in kilometers")
+    distance_km:   float = Field(0, description="Accepted but not used by model")
     traffic_level: int   = Field(..., ge=0, le=2, description="0=LOW, 1=MEDIUM, 2=HIGH")
     time_of_day:   int   = Field(..., ge=0, le=3, description="0=MORNING, 1=AFTERNOON, 2=PEAK, 3=NIGHT")
     route_type:    int   = Field(..., ge=0, le=1, description="0=CITY, 1=HIGHWAY")
 
 class PredictResponse(BaseModel):
-    predicted_time: float   # minutes
+    predicted_time: float   # delay RATIO (e.g. 0.2 = 20% of base time)
     model_used:     str
     features_used:  dict
 
@@ -75,53 +76,52 @@ class PredictResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
-    """Quick health check — confirms ML service is running."""
     return {
         "status": "healthy",
-        "model": "RandomForestRegressor",
+        "model": "RandomForestRegressor (delay ratio)",
         "message": "ML service is running"
     }
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
     """
-    Predicts delivery time in minutes using the trained Random Forest model.
+    Predicts DELAY RATIO using trained Random Forest model.
 
-    Input features:
-        distance_km   : route distance in kilometers
+    Model features (3 only — no distance):
         traffic_level : 0=LOW, 1=MEDIUM, 2=HIGH
         time_of_day   : 0=MORNING, 1=AFTERNOON, 2=PEAK, 3=NIGHT
         route_type    : 0=CITY, 1=HIGHWAY
 
     Returns:
-        predicted_time : estimated delivery time in minutes
+        predicted_time : delay ratio (e.g. 0.2)
+                         Java converts this → delay_minutes = ratio × base_time
     """
     try:
-        # Prepare feature array in the same order as training
+        # ── IMPORTANT: 3 features only, matching train.py FEATURES list ──
         features = np.array([[
-            request.distance_km,
             request.traffic_level,
             request.time_of_day,
             request.route_type
         ]])
 
         logger.info(
-            "Predicting for: dist=%.1f km, traffic=%d, time=%d, route=%d",
-            request.distance_km, request.traffic_level,
-            request.time_of_day, request.route_type
+            "Predicting for: traffic=%d, time=%d, route=%d",
+            request.traffic_level, request.time_of_day, request.route_type
         )
 
-        # Run inference
-        predicted = model.predict(features)[0]
-        predicted = round(float(predicted), 2)
+        # Run inference — returns delay ratio
+        delay_ratio = model.predict(features)[0]
+        delay_ratio = round(float(delay_ratio), 4)
 
-        logger.info("Predicted time: %.2f minutes", predicted)
+        # Clamp to sane range
+        delay_ratio = max(0.01, min(delay_ratio, 1.0))
+
+        logger.info("Predicted delay ratio: %.4f", delay_ratio)
 
         return PredictResponse(
-            predicted_time=predicted,
-            model_used="RandomForestRegressor (100 trees)",
+            predicted_time=delay_ratio,
+            model_used="RandomForestRegressor — delay ratio model",
             features_used={
-                "distance_km":   request.distance_km,
                 "traffic_level": request.traffic_level,
                 "time_of_day":   request.time_of_day,
                 "route_type":    request.route_type

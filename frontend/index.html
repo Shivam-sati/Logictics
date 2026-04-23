@@ -913,7 +913,16 @@
                 const resp = await fetch(`${API_BASE}/route/optimize`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ source, destination, trafficLevel: traffic, timeOfDay, routeType })
+                    body: JSON.stringify({
+                        source,
+                        destination,
+                        trafficLevel: traffic,
+                        timeOfDay,
+                        routeType,
+                        distanceKm: mapsData.distanceKm,
+                        baseTime: mapsData.durationMin
+                    })
+
                 });
 
                 if (!resp.ok) {
@@ -926,8 +935,8 @@
                 // ── Step 4: Compute final result ──
                 // Use Google Maps distance/baseTime (accurate)
                 // Scale ML prediction proportionally if backend used a different distance
-                const scaleFactor = mapsData.distanceKm / Math.max(backendData.distance, 1);
-                let predictedTime = Math.round(backendData.predictedTime * scaleFactor * 10) / 10;
+                let predictedTime = backendData.predictedTime;
+
 
                 // Sanity guard: ML prediction can't be less than 90% of actual base time
                 // (traffic/ML can slow things, but not make trips magically 10x faster)
