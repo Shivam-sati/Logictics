@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LogiPredict — Route Optimizer</title>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <!--
+    ─────────────────────────────────────────────────────────
+    GOOGLE MAPS SETUP
+    Replace YOUR_API_KEY below with your actual key.
+    Make sure these 4 APIs are enabled in Google Cloud Console:
+      1. Maps JavaScript API
+      2. Directions API
+      3. Distance Matrix API
+      4. Geocoding API
+    ─────────────────────────────────────────────────────────
+  -->
+    <script>
+        // We load Maps API dynamically so we can control exactly when initMap fires
+        // This avoids the "loaded without loading=async" warning
+        (function () {
+            const script = document.createElement('script');
+            script.src = 'https://maps.googleapis.com/maps/api/js'
+                + '?key=AIzaSyAHTli_ZHhnHANvdM4MiUWNKm6qQyyKW_I'
+                + '&libraries=places,geometry'
+                + '&loading=async'
+                + '&callback=initMap';
+            script.async = true;
+            script.defer = true;
+            document.head.appendChild(script);
+        })();
+    </script>
+
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #21262d;
+            --border: #30363d;
+            --accent: #58a6ff;
+            --accent2: #3fb950;
+            --warn: #d29922;
+            --danger: #f85149;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --radius: 12px;
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        header {
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .tagline {
+            color: var(--muted);
+            font-size: 13px;
+            border-left: 1px solid var(--border);
+            padding-left: 16px;
+        }
+
+        .badge {
+            margin-left: auto;
+            background: rgba(88, 166, 255, 0.1);
+            border: 1px solid rgba(88, 166, 255, 0.3);
+            color: var(--accent);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* ── Layout ── */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 22px;
+            box-shadow: var(--shadow);
+        }
+
+        .card-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--muted);
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-title::before {
+            content: '';
+            display: block;
+            width: 3px;
+            height: 13px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+
+        /* ── Form ── */
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input,
+        select {
+            width: 100%;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 13px;
+            color: var(--text);
+            font-size: 14px;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        select option {
+            background: var(--surface2);
+        }
+
+        /* Google Places Autocomplete dropdown dark theme */
+        .pac-container {
+            background: var(--surface2) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 8px !important;
+            box-shadow: var(--shadow) !important;
+            margin-top: 4px;
+            font-family: inherit;
+        }
+
+        .pac-item {
+            color: var(--text) !important;
+            padding: 8px 12px !important;
+            cursor: pointer;
+            border-top: 1px solid var(--border) !important;
+        }
+
+        .pac-item:hover {
+            background: var(--surface) !important;
+        }
+
+        .pac-item-query {
+            color: var(--accent) !important;
+            font-size: 13px;
+        }
+
+        .pac-matched {
+            color: var(--accent2) !important;
+        }
+
+        .pac-icon {
+            display: none;
+        }
+
+        /* Traffic auto badge */
+        .traffic-auto {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 13px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text);
+        }
+
+        .traffic-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .info-box {
+            background: rgba(88, 166, 255, 0.08);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+            border-radius: 8px;
+            padding: 10px 13px;
+            font-size: 12px;
+            color: var(--accent);
+            margin-top: -8px;
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        /* ── Button ── */
+        .btn {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, #1f6feb 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(88, 166, 255, 0.35);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .spinner {
+            width: 15px;
+            height: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── Results ── */
+        #result-card {
+            display: none;
+            margin-top: 14px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .result-item {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 13px;
+        }
+
+        .result-item .rlabel {
+            font-size: 10px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .result-item .rvalue {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .result-item .runit {
+            font-size: 11px;
+            color: var(--muted);
+            margin-left: 2px;
+        }
+
+        .risk-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .risk-LOW {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent2);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+
+        .risk-MEDIUM {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--warn);
+            border: 1px solid rgba(210, 153, 34, 0.3);
+        }
+
+        .risk-HIGH {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+
+        .source-label {
+            font-size: 11px;
+            color: var(--muted);
+            text-align: center;
+            margin-top: 8px;
+            padding: 5px;
+            background: var(--surface2);
+            border-radius: 6px;
+        }
+
+        /* ── Right column ── */
+        .right-col {
+            display: flex;
+            flex-direction: column;
+            gap: 22px;
+        }
+
+        /* ── Google Map ── */
+        #map {
+            width: 100%;
+            height: 400px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+
+        /* ── Charts ── */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 22px;
+        }
+
+        .chart-wrap {
+            position: relative;
+            height: 190px;
+        }
+
+        /* ── Trends ── */
+        .trends-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .trend-item {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .trend-item .t-label {
+            font-size: 10px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .trend-item .t-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .trend-item .t-unit {
+            font-size: 10px;
+            color: var(--muted);
+        }
+
+        /* ── History table ── */
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        thead th {
+            background: var(--surface2);
+            color: var(--muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+            padding: 9px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tbody tr {
+            border-bottom: 1px solid var(--border);
+            transition: background 0.15s;
+        }
+
+        tbody tr:hover {
+            background: var(--surface2);
+        }
+
+        tbody td {
+            padding: 9px 12px;
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .chip-LOW {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent2);
+        }
+
+        .chip-MEDIUM {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--warn);
+        }
+
+        .chip-HIGH {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--danger);
+        }
+
+        /* ── Toast ── */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #2d1b1b;
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+            z-index: 9999;
+            max-width: 360px;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+
+            .trends-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="logo">🚚 LogiPredict</div>
+        <div class="tagline">ML-Powered Logistics Route Optimizer</div>
+        <div class="badge">Live Demo</div>
+    </header>
+
+    <div class="container">
+
+        <!-- ── LEFT: Form + Results ── -->
+        <div>
+            <div class="card">
+                <div class="card-title">Route Parameters</div>
+
+                <div class="form-group">
+                    <label>Source Location</label>
+                    <!-- Google Places Autocomplete will attach to this input -->
+                    <input type="text" id="source" placeholder="Type a city or address…" autocomplete="off" />
+                </div>
+
+                <div class="form-group">
+                    <label>Destination Location</label>
+                    <input type="text" id="destination" placeholder="Type a city or address…" autocomplete="off" />
+                </div>
+
+                <div class="form-group">
+                    <label>Time of Day</label>
+                    <select id="timeOfDay" onchange="autoSetTraffic()">
+                        <option value="MORNING">🌅 MORNING — 7am–10am</option>
+                        <option value="AFTERNOON" selected>☀️ AFTERNOON — 11am–4pm</option>
+                        <option value="PEAK">🌆 PEAK — 5pm–8pm (Rush hour)</option>
+                        <option value="NIGHT">🌙 NIGHT — After 9pm</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Route Type</label>
+                    <select id="routeType">
+                        <option value="CITY" selected>🏙️ CITY — Urban roads</option>
+                        <option value="HIGHWAY">🛣️ HIGHWAY — Expressway</option>
+                    </select>
+                </div>
+
+                <!-- Traffic: auto-detected, not a manual user input -->
+                <div class="form-group">
+                    <label>
+                        Traffic Level
+                        <span style="color:var(--accent); font-size:10px; text-transform:none; margin-left:4px;">(auto
+                            from time of day)</span>
+                    </label>
+                    <div class="traffic-auto" id="traffic-display">
+                        <span class="traffic-dot" id="traffic-dot" style="background:#d29922;"></span>
+                        <span id="traffic-text">MEDIUM — Moderate traffic (auto)</span>
+                    </div>
+                    <input type="hidden" id="trafficLevel" value="MEDIUM" />
+                </div>
+
+                <div class="info-box">
+                    💡 Traffic is auto-estimated from time of day — the same logic real logistics platforms use. No
+                    guesswork needed from the user.
+                </div>
+
+                <button class="btn btn-primary" id="optimizeBtn" onclick="optimizeRoute()">
+                    <span class="spinner" id="spinner"></span>
+                    <span id="btn-text">⚡ Optimize Route</span>
+                </button>
+            </div>
+
+            <!-- Results (hidden until first call) -->
+            <div class="card" id="result-card">
+                <div class="card-title">Prediction Results</div>
+                <div class="result-grid">
+                    <div class="result-item">
+                        <div class="rlabel">Distance</div>
+                        <div class="rvalue" id="res-distance">—<span class="runit">km</span></div>
+                    </div>
+                    <div class="result-item">
+                        <div class="rlabel">Base Time (Maps)</div>
+                        <div class="rvalue" id="res-base">—<span class="runit">min</span></div>
+                    </div>
+                    <div class="result-item">
+                        <div class="rlabel">ML Predicted Time</div>
+                        <div class="rvalue" id="res-predicted" style="color:var(--accent)">—<span
+                                class="runit">min</span></div>
+                    </div>
+                    <div class="result-item">
+                        <div class="rlabel">Expected Delay</div>
+                        <div class="rvalue" id="res-delay" style="color:var(--warn)">—<span class="runit">min</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="risk-badge" id="risk-badge">—</div>
+                <div class="source-label" id="data-source">—</div>
+            </div>
+        </div>
+
+        <!-- ── RIGHT: Map + Charts + Analytics ── -->
+        <div class="right-col">
+
+            <!-- Google Map -->
+            <div class="card" style="padding:0; overflow:hidden;">
+                <div id="map"></div>
+            </div>
+
+            <!-- Charts -->
+            <div class="charts-row">
+                <div class="card">
+                    <div class="card-title">Base vs ML Predicted Time</div>
+                    <div class="chart-wrap"><canvas id="timeChart"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Delay History</div>
+                    <div class="chart-wrap"><canvas id="delayChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Trend Analytics -->
+            <div class="card">
+                <div class="card-title">
+                    Trend Analytics
+                    <button onclick="loadTrends()"
+                        style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;">↻
+                        Refresh</button>
+                </div>
+                <div class="trends-grid">
+                    <div class="trend-item">
+                        <div class="t-label">Total Routes</div>
+                        <div class="t-value" id="tr-total">0</div>
+                        <div class="t-unit">optimized</div>
+                    </div>
+                    <div class="trend-item">
+                        <div class="t-label">Avg Delay</div>
+                        <div class="t-value" id="tr-delay">—</div>
+                        <div class="t-unit">minutes</div>
+                    </div>
+                    <div class="trend-item">
+                        <div class="t-label">Avg Predicted</div>
+                        <div class="t-value" id="tr-predicted">—</div>
+                        <div class="t-unit">minutes</div>
+                    </div>
+                    <div class="trend-item">
+                        <div class="t-label">Peak Traffic</div>
+                        <div class="t-value" id="tr-traffic" style="font-size:15px;">—</div>
+                        <div class="t-unit">common level</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="card">
+                <div class="card-title">Route History</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Route</th>
+                                <th>Traffic</th>
+                                <th>Distance</th>
+                                <th>Base (Maps)</th>
+                                <th>ML Predicted</th>
+                                <th>Delay</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body">
+                            <tr>
+                                <td colspan="6" style="color:var(--muted);text-align:center;padding:20px;">
+                                    No routes optimized yet
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        // ─────────────────────────────────────────────────────────
+        // CONFIG
+        // ─────────────────────────────────────────────────────────
+        const API_BASE = "http://localhost:8080";
+
+        // ─────────────────────────────────────────────────────────
+        // GOOGLE MAPS STATE
+        // ─────────────────────────────────────────────────────────
+        let gMap = null;   // google.maps.Map instance
+        let directionsService = null;   // for route calculation
+        let directionsRenderer = null;   // for drawing route on map
+        let placesSourceAC = null;   // autocomplete for source input
+        let placesDestAC = null;   // autocomplete for destination input
+
+        // ─────────────────────────────────────────────────────────
+        // CHART STATE
+        // ─────────────────────────────────────────────────────────
+        let timeChart = null;
+        let delayChart = null;
+        const chartHistory = { labels: [], baseTimes: [], predicted: [], delays: [] };
+
+        // ─────────────────────────────────────────────────────────
+        // initMap() — called automatically by Google Maps script
+        // Sets up map, directions, and Places autocomplete
+        // ─────────────────────────────────────────────────────────
+        function initMap() {
+            // Dark-styled map centered on India
+            gMap = new google.maps.Map(document.getElementById("map"), {
+                center: { lat: 20.5937, lng: 78.9629 },
+                zoom: 5,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: true,
+                styles: darkMapStyle()
+            });
+
+            // Directions service: calculates route geometry
+            directionsService = new google.maps.DirectionsService();
+
+            // Directions renderer: draws the blue route line on the map
+            directionsRenderer = new google.maps.DirectionsRenderer({
+                map: gMap,
+                suppressMarkers: false,   // show A/B markers
+                polylineOptions: {
+                    strokeColor: "#58a6ff",
+                    strokeWeight: 5,
+                    strokeOpacity: 0.85
+                }
+            });
+
+            // Places Autocomplete — typed suggestions in inputs
+            // Biased to India for relevant results
+            const indiaOptions = {
+                componentRestrictions: { country: "in" },
+                fields: ["formatted_address", "geometry", "name"]
+            };
+            placesSourceAC = new google.maps.places.Autocomplete(
+                document.getElementById("source"), indiaOptions
+            );
+            placesDestAC = new google.maps.places.Autocomplete(
+                document.getElementById("destination"), indiaOptions
+            );
+
+            // Prevent Enter key from submitting when autocomplete is open
+            placesSourceAC.addListener("place_changed", () => { });
+            placesDestAC.addListener("place_changed", () => { });
+
+            console.log("✅ Google Maps initialized");
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // AUTO-DETECT TRAFFIC FROM TIME OF DAY
+        // Key UX insight: users don't know traffic in advance,
+        // but time of day reliably predicts it.
+        // ─────────────────────────────────────────────────────────
+        const TRAFFIC_MAP = {
+            MORNING: { level: "HIGH", color: "#f85149", text: "HIGH — Morning rush hour (auto-detected)" },
+            AFTERNOON: { level: "MEDIUM", color: "#d29922", text: "MEDIUM — Moderate traffic (auto-detected)" },
+            PEAK: { level: "HIGH", color: "#f85149", text: "HIGH — Evening peak hour (auto-detected)" },
+            NIGHT: { level: "LOW", color: "#3fb950", text: "LOW — Clear roads after 9pm (auto-detected)" }
+        };
+
+        function autoSetTraffic() {
+            const t = TRAFFIC_MAP[document.getElementById("timeOfDay").value] || TRAFFIC_MAP.AFTERNOON;
+            document.getElementById("trafficLevel").value = t.level;
+            document.getElementById("traffic-dot").style.background = t.color;
+            document.getElementById("traffic-text").textContent = t.text;
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // GET DISTANCE + BASE TIME FROM GOOGLE MAPS DISTANCE MATRIX
+        // This is the "real world baseline" — what Maps says without
+        // considering additional logistics delay factors.
+        // ─────────────────────────────────────────────────────────
+        function getDistanceMatrix(source, destination) {
+            return new Promise((resolve, reject) => {
+                const service = new google.maps.DistanceMatrixService();
+                service.getDistanceMatrix(
+                    {
+                        origins: [source],
+                        destinations: [destination],
+                        travelMode: google.maps.TravelMode.DRIVING,
+                        unitSystem: google.maps.UnitSystem.METRIC,
+                        drivingOptions: {
+                            departureTime: new Date(),       // current traffic conditions
+                            trafficModel: google.maps.TrafficModel.BEST_GUESS
+                        }
+                    },
+                    (response, status) => {
+                        if (status !== "OK") { reject(new Error(`Distance Matrix: ${status}`)); return; }
+
+                        const element = response.rows[0].elements[0];
+                        if (element.status !== "OK") { reject(new Error(`Route element: ${element.status}`)); return; }
+
+                        // duration_in_traffic is more accurate than duration when available
+                        const durationSec = (element.duration_in_traffic || element.duration).value;
+                        resolve({
+                            distanceKm: Math.round(element.distance.value / 100) / 10,  // m → km, 1 decimal
+                            durationMin: Math.round(durationSec / 6) / 10                 // s → min, 1 decimal
+                        });
+                    }
+                );
+            });
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // DRAW ROUTE ON GOOGLE MAP
+        // Uses Directions API to show the actual road path
+        // ─────────────────────────────────────────────────────────
+        function drawGoogleMapsRoute(source, destination) {
+            return new Promise((resolve, reject) => {
+                directionsService.route(
+                    {
+                        origin: source,
+                        destination: destination,
+                        travelMode: google.maps.TravelMode.DRIVING
+                    },
+                    (result, status) => {
+                        if (status === "OK") {
+                            directionsRenderer.setDirections(result);
+                            resolve();
+                        } else {
+                            // Non-fatal: log but don't crash the whole flow
+                            console.warn("Directions API:", status);
+                            reject(new Error(status));
+                        }
+                    }
+                );
+            });
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // MAIN: OPTIMIZE ROUTE
+        // Full flow:
+        //   1. Validate inputs
+        //   2. Get real distance+time from Google Maps Distance Matrix
+        //   3. Draw route on map via Directions API
+        //   4. Call Spring Boot backend → ML prediction
+        //   5. Display results, update charts, refresh analytics
+        // ─────────────────────────────────────────────────────────
+        async function optimizeRoute() {
+            const source = document.getElementById("source").value.trim();
+            const destination = document.getElementById("destination").value.trim();
+            const traffic = document.getElementById("trafficLevel").value;
+            const timeOfDay = document.getElementById("timeOfDay").value;
+            const routeType = document.getElementById("routeType").value;
+
+            if (!source) { showToast("Please enter a source location."); return; }
+            if (!destination) { showToast("Please enter a destination location."); return; }
+            if (source.toLowerCase() === destination.toLowerCase()) {
+                showToast("Source and destination must be different."); return;
+            }
+            if (!gMap) { showToast("Google Maps is still loading. Please wait a moment."); return; }
+
+            setLoading(true);
+
+            try {
+                // ── Step 1: Get real distance + base time from Google Maps ──
+                let mapsData;
+                try {
+                    mapsData = await getDistanceMatrix(source, destination);
+                } catch (mapsErr) {
+                    showToast(`Google Maps error: ${mapsErr.message}\nCheck your API key and enabled APIs.`);
+                    setLoading(false);
+                    return;
+                }
+
+                // ── Step 2: Draw actual road route on the map ──
+                try {
+                    await drawGoogleMapsRoute(source, destination);
+                } catch {
+                    // Route draw failed — not fatal, results still show
+                    console.warn("Route draw failed — results still displayed.");
+                }
+
+                // ── Step 3: Call Spring Boot backend for ML prediction ──
+                const resp = await fetch(`${API_BASE}/route/optimize`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ source, destination, trafficLevel: traffic, timeOfDay, routeType })
+                });
+
+                if (!resp.ok) {
+                    const errBody = await resp.json().catch(() => ({}));
+                    throw new Error(errBody.error || `Backend error ${resp.status} — is Spring Boot running on port 8080?`);
+                }
+
+                const backendData = await resp.json();
+
+                // ── Step 4: Compute final result ──
+                // Use Google Maps distance/baseTime (accurate)
+                // Scale ML prediction proportionally if backend used a different distance
+                const scaleFactor = mapsData.distanceKm / Math.max(backendData.distance, 1);
+                let predictedTime = Math.round(backendData.predictedTime * scaleFactor * 10) / 10;
+
+                // Sanity guard: ML prediction can't be less than 90% of actual base time
+                // (traffic/ML can slow things, but not make trips magically 10x faster)
+                const minAllowed = Math.round(mapsData.durationMin * 0.90 * 10) / 10;
+                if (predictedTime < minAllowed) predictedTime = minAllowed;
+
+                const delay = Math.round((predictedTime - mapsData.durationMin) * 10) / 10;
+                const delayRisk = delay < 10 ? "LOW" : delay < 25 ? "MEDIUM" : "HIGH";
+
+                const finalResult = {
+                    source,
+                    destination,
+                    distance: mapsData.distanceKm,
+                    baseTime: mapsData.durationMin,
+                    predictedTime,
+                    delay: Math.max(0, delay),
+                    delayRisk,
+                    traffic,
+                    dataSource: "Google Maps Distance Matrix + Random Forest ML"
+                };
+
+                // ── Step 5: Show everything ──
+                displayResults(finalResult);
+                updateCharts(finalResult, source, destination);
+                loadTrends();
+                loadHistory();
+
+            } catch (err) {
+                console.error(err);
+                showToast(`❌ ${err.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // DISPLAY RESULTS
+        // ─────────────────────────────────────────────────────────
+        function displayResults(d) {
+            document.getElementById("result-card").style.display = "block";
+
+            document.getElementById("res-distance").innerHTML = `${d.distance}<span class="runit"> km</span>`;
+            document.getElementById("res-base").innerHTML = `${d.baseTime}<span class="runit"> min</span>`;
+            document.getElementById("res-predicted").innerHTML = `${d.predictedTime}<span class="runit"> min</span>`;
+            document.getElementById("res-delay").innerHTML = `+${d.delay}<span class="runit"> min</span>`;
+
+            const icons = { LOW: "✅", MEDIUM: "⚠️", HIGH: "🚨" };
+            const badge = document.getElementById("risk-badge");
+            badge.className = `risk-badge risk-${d.delayRisk}`;
+            badge.textContent = `${icons[d.delayRisk]} Delay Risk: ${d.delayRisk}`;
+
+            document.getElementById("data-source").textContent = `📡 ${d.dataSource}`;
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // UPDATE CHARTS
+        // ─────────────────────────────────────────────────────────
+        function updateCharts(d, src, dst) {
+            const label = `${src.slice(0, 5)}→${dst.slice(0, 5)}`;
+
+            // Keep rolling window of last 8 routes
+            if (chartHistory.labels.length >= 8) {
+                chartHistory.labels.shift();
+                chartHistory.baseTimes.shift();
+                chartHistory.predicted.shift();
+                chartHistory.delays.shift();
+            }
+            chartHistory.labels.push(label);
+            chartHistory.baseTimes.push(d.baseTime);
+            chartHistory.predicted.push(d.predictedTime);
+            chartHistory.delays.push(d.delay);
+
+            // Bar chart: Base vs Predicted
+            if (timeChart) timeChart.destroy();
+            timeChart = new Chart(document.getElementById("timeChart").getContext("2d"), {
+                type: "bar",
+                data: {
+                    labels: chartHistory.labels,
+                    datasets: [
+                        { label: "Base Time — Google Maps (min)", data: chartHistory.baseTimes, backgroundColor: "rgba(88,166,255,0.75)", borderRadius: 5, borderSkipped: false },
+                        { label: "ML Predicted Time (min)", data: chartHistory.predicted, backgroundColor: "rgba(63,185,80,0.75)", borderRadius: 5, borderSkipped: false }
+                    ]
+                },
+                options: chartOptions("Time (minutes)")
+            });
+
+            // Line chart: Delay over time
+            if (delayChart) delayChart.destroy();
+            delayChart = new Chart(document.getElementById("delayChart").getContext("2d"), {
+                type: "line",
+                data: {
+                    labels: chartHistory.labels,
+                    datasets: [{
+                        label: "Delay Added by ML (min)",
+                        data: chartHistory.delays,
+                        borderColor: "#d29922",
+                        backgroundColor: "rgba(210,153,34,0.15)",
+                        borderWidth: 2.5,
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: "#d29922",
+                        pointRadius: 5
+                    }]
+                },
+                options: chartOptions("Delay (minutes)")
+            });
+        }
+
+        function chartOptions(yLabel) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: "#8b949e", font: { size: 11 }, boxWidth: 12 } }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: "#8b949e", font: { size: 10 } },
+                        grid: { color: "rgba(48,54,61,0.5)" }
+                    },
+                    y: {
+                        title: { display: true, text: yLabel, color: "#8b949e", font: { size: 10 } },
+                        ticks: { color: "#8b949e", font: { size: 10 } },
+                        grid: { color: "rgba(48,54,61,0.5)" },
+                        beginAtZero: true
+                    }
+                }
+            };
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // LOAD TRENDS + HISTORY FROM BACKEND
+        // ─────────────────────────────────────────────────────────
+        async function loadTrends() {
+            try {
+                const d = await fetch(`${API_BASE}/route/trends`).then(r => r.json());
+                document.getElementById("tr-total").textContent = d.totalRequests;
+                document.getElementById("tr-delay").textContent = Math.max(0, d.averageDelay);
+                document.getElementById("tr-predicted").textContent = d.averagePredictedTime;
+                document.getElementById("tr-traffic").textContent = d.mostFrequentTraffic;
+            } catch { /* backend not yet ready — silent */ }
+        }
+
+        async function loadHistory() {
+            try {
+                const rows = await fetch(`${API_BASE}/route/history`).then(r => r.json());
+                const tbody = document.getElementById("history-body");
+
+                if (!rows?.length) {
+                    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:20px;">No routes yet</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = rows.map(r => {
+                    const dc = r.delay < 10 ? "LOW" : r.delay < 25 ? "MEDIUM" : "HIGH";
+                    return `<tr>
+        <td>${r.source} → ${r.destination}</td>
+        <td><span class="chip chip-${r.trafficLevel}">${r.trafficLevel}</span></td>
+        <td>${r.distance} km</td>
+        <td>${r.baseTime} min</td>
+        <td>${r.predictedTime} min</td>
+        <td><span class="chip chip-${dc}">+${Math.max(0, r.delay)} min</span></td>
+      </tr>`;
+                }).join("");
+            } catch { /* silent */ }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // UI HELPERS
+        // ─────────────────────────────────────────────────────────
+        function setLoading(on) {
+            document.getElementById("optimizeBtn").disabled = on;
+            document.getElementById("spinner").style.display = on ? "block" : "none";
+            document.getElementById("btn-text").textContent = on ? "Analyzing route…" : "⚡ Optimize Route";
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById("toast");
+            t.textContent = msg;
+            t.style.display = "block";
+            setTimeout(() => t.style.display = "none", 6000);
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // DARK MAP STYLE — matches the app's dark theme
+        // ─────────────────────────────────────────────────────────
+        function darkMapStyle() {
+            return [
+                { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
+                { elementType: "labels.text.fill", stylers: [{ color: "#8b949e" }] },
+                { elementType: "labels.text.stroke", stylers: [{ color: "#161b22" }] },
+                { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d333b" }] },
+                { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#3a4252" }] },
+                { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#58a6ff" }, { weight: 0.5 }] },
+                { featureType: "water", elementType: "geometry", stylers: [{ color: "#0d1117" }] },
+                { featureType: "poi", stylers: [{ visibility: "off" }] },
+                { featureType: "transit", stylers: [{ visibility: "off" }] },
+                { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#e6edf3" }] }
+            ];
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // BOOT
+        // ─────────────────────────────────────────────────────────
+        window.addEventListener("load", () => {
+            autoSetTraffic();
+            loadTrends();
+            loadHistory();
+        });
+    </script>
+</body>
+
+</html>
